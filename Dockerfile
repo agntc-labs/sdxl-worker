@@ -1,13 +1,9 @@
 # ── RunPod Serverless SDXL Worker (slim — models from Network Volume) ──
 # Models are loaded from /runpod-volume/models/ at runtime.
-# The Docker image is just code + Python deps (~5GB, fast builds).
-#
-# Build:  docker buildx build --platform linux/amd64 -t sdxl-worker .
-# Push:   docker tag sdxl-worker <dockerhub-user>/sdxl-worker:latest
-#         docker push <dockerhub-user>/sdxl-worker:latest
+# Uses runtime CUDA image (not devel) — ~4GB base, inference only.
 # ──────────────────────────────────────────────────────────────────────
 
-FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
 
 WORKDIR /app
 
