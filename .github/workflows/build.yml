@@ -46,3 +46,11 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           platforms: linux/amd64
           no-cache: true
+
+      - name: Make package public
+        run: |
+          curl -s -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/orgs/agntc-labs/packages/container/sdxl-worker" \
+            -d '{"visibility":"public"}' || echo "Could not set visibility (may need manual update)"
