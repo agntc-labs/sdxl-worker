@@ -1,9 +1,9 @@
-# ── RunPod Serverless SDXL Worker (slim — models from Network Volume) ──
-# Models are loaded from /runpod-volume/models/ at runtime.
-# Uses runtime CUDA image (not devel) — ~4GB base, inference only.
+# ── RunPod Serverless SDXL Worker ──
+# Uses RunPod's official base image (supports all RunPod GPU types).
+# Models downloaded from HuggingFace at first cold start.
 # ──────────────────────────────────────────────────────────────────────
 
-FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 # ── OCI labels — link to repo for public visibility ─────────────────
 LABEL org.opencontainers.image.source="https://github.com/agntc-labs/sdxl-worker"
@@ -11,11 +11,6 @@ LABEL org.opencontainers.image.description="RunPod Serverless SDXL Worker"
 LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
-
-# ── System deps ──────────────────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx libglib2.0-0 wget \
-    && rm -rf /var/lib/apt/lists/*
 
 # ── Python deps ──────────────────────────────────────────────────────
 COPY requirements.txt .
