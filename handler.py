@@ -60,13 +60,91 @@ import threading
 import runpod
 
 # ── Constants ────────────────────────────────────────────────────────
-# Check Network Volume first (/runpod-volume/), fall back to baked-in /models/
-_VOL = "/runpod-volume/models" if os.path.isdir("/runpod-volume/models") else "/models"
+# Network Volume path — persists across worker restarts
+_VOL = "/runpod-volume/models" if os.path.isdir("/runpod-volume") else "/models"
 MODEL_PATH = f"{_VOL}/cyberrealistic-pony-v8-sdxl"
 LORA_DIR = f"{_VOL}/loras/sdxl"
 IP_ADAPTER_DIR = f"{_VOL}/ip-adapter-sdxl"
 VAE_PATH = f"{_VOL}/sdxl-vae-fp16-fix"
 FACE_MODEL_PATH = f"{_VOL}/yolo/face_yolov8n.pt"
+
+# HuggingFace repos for auto-download
+_HF_TOKEN = os.environ.get("HF_TOKEN", "")
+_HF_MODEL_REPO = "pure-justin/cyberrealistic-pony-v8-sdxl"
+_HF_LORA_REPO = "pure-justin/sdxl-loras"
+
+
+def _ensure_models():
+    """Download models from HuggingFace if not present on Network Volume.
+
+    First cold start: ~3-5 min (downloads ~10GB at datacenter speeds).
+    Subsequent starts: instant (cached on Network Volume).
+    """
+    from huggingface_hub import snapshot_download
+    import subprocess
+
+    os.makedirs(_VOL, exist_ok=True)
+
+    # 1. CyberRealistic Pony v8 (~6.5GB)
+    if not os.path.exists(os.path.join(MODEL_PATH, "model_index.json")):
+        log.info("Downloading CyberRealistic Pony v8 from HuggingFace...")
+        snapshot_download(
+            _HF_MODEL_REPO, local_dir=MODEL_PATH,
+            local_dir_use_symlinks=False, token=_HF_TOKEN or None,
+        )
+        log.info("Model downloaded to %s", MODEL_PATH)
+    else:
+        log.info("Model found at %s", MODEL_PATH)
+
+    # 2. LoRAs (~950MB)
+    if not os.path.exists(os.path.join(LORA_DIR, "good_hands_pony.safetensors")):
+        log.info("Downloading LoRAs from HuggingFace...")
+        os.makedirs(LORA_DIR, exist_ok=True)
+        snapshot_download(
+            _HF_LORA_REPO, local_dir=LORA_DIR,
+            local_dir_use_symlinks=False, token=_HF_TOKEN or None,
+        )
+        log.info("LoRAs downloaded to %s", LORA_DIR)
+    else:
+        log.info("LoRAs found at %s", LORA_DIR)
+
+    # 3. VAE (public, ~335MB)
+    if not os.path.exists(os.path.join(VAE_PATH, "diffusion_pytorch_model.safetensors")):
+        log.info("Downloading sdxl-vae-fp16-fix...")
+        snapshot_download(
+            "madebyollin/sdxl-vae-fp16-fix", local_dir=VAE_PATH,
+            local_dir_use_symlinks=False,
+        )
+        log.info("VAE downloaded")
+    else:
+        log.info("VAE found at %s", VAE_PATH)
+
+    # 4. IP-Adapter (public, ~3.2GB)
+    _ip_adapter_file = os.path.join(IP_ADAPTER_DIR, "sdxl_models",
+                                     "ip-adapter-plus-face_sdxl_vit-h.safetensors")
+    if not os.path.exists(_ip_adapter_file):
+        log.info("Downloading IP-Adapter Plus Face...")
+        snapshot_download(
+            "h94/IP-Adapter",
+            allow_patterns=["sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors",
+                           "models/image_encoder/*"],
+            local_dir=IP_ADAPTER_DIR, local_dir_use_symlinks=False,
+        )
+        log.info("IP-Adapter downloaded")
+    else:
+        log.info("IP-Adapter found at %s", IP_ADAPTER_DIR)
+
+    # 5. YOLO face detection (~6MB)
+    if not os.path.exists(FACE_MODEL_PATH):
+        log.info("Downloading YOLOv8n face model...")
+        os.makedirs(os.path.dirname(FACE_MODEL_PATH), exist_ok=True)
+        subprocess.run([
+            "wget", "-q", "-O", FACE_MODEL_PATH,
+            "https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.pt",
+        ], check=True)
+        log.info("YOLO downloaded")
+    else:
+        log.info("YOLO found at %s", FACE_MODEL_PATH)
 
 LORA_CONFIG = {
     "good_hands":  ("good_hands_pony.safetensors",         0.9),
@@ -708,6 +786,8 @@ def handler(job):
 
 if __name__ == "__main__":
     log.info("Initializing SDXL worker (CUDA)...")
+    log.info("Model volume: %s", _VOL)
+    _ensure_models()  # Download from HuggingFace if not cached on volume
     _load_pipeline()
     log.info("Starting RunPod serverless worker...")
     runpod.serverless.start({"handler": handler})
