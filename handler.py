@@ -134,15 +134,20 @@ def _ensure_models():
     else:
         log.info("IP-Adapter found at %s", IP_ADAPTER_DIR)
 
-    # 5. YOLO face detection (~6MB)
+    # 5. YOLO face detection (~6MB) — optional, ADetailer won't work without it
     if not os.path.exists(FACE_MODEL_PATH):
         log.info("Downloading YOLOv8n face model...")
         os.makedirs(os.path.dirname(FACE_MODEL_PATH), exist_ok=True)
-        subprocess.run([
-            "wget", "-q", "-O", FACE_MODEL_PATH,
-            "https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.pt",
-        ], check=True)
-        log.info("YOLO downloaded")
+        try:
+            subprocess.run([
+                "wget", "-q", "--timeout=15", "-O", FACE_MODEL_PATH,
+                "https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.pt",
+            ], check=True)
+            log.info("YOLO downloaded")
+        except Exception as e:
+            log.warning("YOLO download failed (%s) — ADetailer disabled", e)
+            if os.path.exists(FACE_MODEL_PATH):
+                os.remove(FACE_MODEL_PATH)  # Remove partial download
     else:
         log.info("YOLO found at %s", FACE_MODEL_PATH)
 

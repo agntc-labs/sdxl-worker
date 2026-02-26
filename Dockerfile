@@ -5,6 +5,11 @@
 
 FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
 
+# ── OCI labels — link to repo for public visibility ─────────────────
+LABEL org.opencontainers.image.source="https://github.com/agntc-labs/sdxl-worker"
+LABEL org.opencontainers.image.description="RunPod Serverless SDXL Worker"
+LABEL org.opencontainers.image.licenses="MIT"
+
 WORKDIR /app
 
 # ── System deps ──────────────────────────────────────────────────────
