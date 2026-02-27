@@ -162,21 +162,26 @@ LORA_CONFIG = {
 PONY_QUALITY_PREFIX = (
     "score_9, score_8_up, score_7_up, source_pony, rating_explicit, "
     "(photorealistic:1.3), (uniform skin tone:1.4), "
-    "(detailed eyes:1.2), "
+    "(detailed eyes:1.3), (realistic eyes:1.2), (sharp eyes:1.2), "
+    "(natural eye color:1.1), (eye reflections:1.1), "
 )
 
 DEFAULT_NEGATIVE = (
     "score_1, score_2, score_3, score_4, score_5, score_6, "
     "tan lines, bikini lines, "
     "close-up, face only, head only, extreme close-up, portrait only, headshot, "
-    "bad anatomy, bad hands, deformed, ugly, blurry, "
-    "(bad eyes:1.3), cross-eyed, asymmetric eyes, "
+    "(bad anatomy:1.3), (bad hands:1.3), (deformed:1.2), ugly, blurry, "
+    "(extra fingers:1.3), (missing fingers:1.3), (too many fingers:1.3), (fused fingers:1.3), "
+    "(mutated hands:1.2), (malformed hands:1.2), wrong number of fingers, "
+    "(bad eyes:1.4), (asymmetric eyes:1.3), (uneven eyes:1.3), cross-eyed, "
+    "(dead eyes:1.3), (empty eyes:1.2), (glowing eyes:1.2), (misaligned pupils:1.3), "
+    "(wonky eyes:1.2), (different sized eyes:1.2), "
     "clean shaven, dark hair, black hair, brown hair, young man, teenager, "
     "source_cartoon, source_anime, source_furry, "
     "(anime:1.4), (cartoon:1.4), (3d render:1.3), (illustration:1.3), "
     "painting, drawing, digital art, CGI, "
     "text, watermark, username, censored, monochrome, "
-    "extra limbs, missing limbs, malformed hands, fused fingers, "
+    "extra limbs, missing limbs, extra arms, extra legs, "
     "overexposed, underexposed, plastic skin, airbrushed"
 )
 
