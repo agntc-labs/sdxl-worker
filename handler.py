@@ -364,7 +364,7 @@ def _generate(params):
     cfg = params.get("cfg", 6.0)
     seed = params.get("seed")
     negative = params.get("negative")
-    face_ref_b64 = params.get("face_ref_b64")
+    face_ref_b64 = params.get("face_refs_b64") or params.get("face_ref_b64")
     face_scale = params.get("face_scale", IP_ADAPTER_SCALE)
     mask_mode = params.get("mask_mode", "horizontal")
 
