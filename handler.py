@@ -160,8 +160,7 @@ LORA_CONFIG = {
 }
 
 PONY_QUALITY_PREFIX = (
-    "score_9, score_8_up, score_7_up, source_pony, rating_explicit, "
-    "(photorealistic:1.3), (even skin tone:1.4), (detailed eyes:1.2), "
+    "score_9, score_8_up, score_7_up, source_pony, "
 )
 
 DEFAULT_NEGATIVE = (
