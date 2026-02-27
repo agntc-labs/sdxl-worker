@@ -1,10 +1,10 @@
 """RunPod Serverless SDXL Worker — CyberRealistic Pony v8 pipeline on CUDA.
 
 Replicates the local sdxl_server.py pipeline (MPS) for cloud A100/A40 GPUs:
-  - CyberRealistic Pony v8 SDXL + 5 LoRAs + FreeU + IP-Adapter Plus Face
+  - CyberRealistic Pony v8 SDXL + 5 LoRAs + FreeU
   - Clip skip 2, EulerAncestral scheduler, fp16-fix VAE
   - BREAK keyword support for character separation
-  - Multi-face gradient masking (horizontal/vertical)
+  - Dynamic style presets (realistic, anime, cartoon, oil_painting, watercolor, comic)
   - ADetailer face fix (YOLO detect -> img2img crop -> Poisson blend)
   - Returns base64-encoded PNG image
 
@@ -16,19 +16,16 @@ Input schema (matches tools.py call signature):
       # -- generate params --
       "prompt": str,
       "negative": str | null,
+      "style": str (default "realistic"),  # realistic|anime|cartoon|oil_painting|watercolor|comic
       "steps": int (default 35),
       "cfg": float (default 6.0),
       "width": int (default 832),
       "height": int (default 1216),
       "seed": int | null,
-      "face_ref_b64": [str] | str | null,   # base64-encoded face reference images
-      "face_scale": float (default 0.5),
-      "mask_mode": "horizontal" | "vertical" (default "horizontal"),
 
       # -- adetail params --
       "image_b64": str,                     # base64-encoded source image
-      "face_refs_b64": [str],               # base64-encoded face references (left-to-right)
-      "face_scale": float (default 0.55),
+      "face_prompt": str | null,            # text prompt for face refinement
       "denoise": float (default 0.25),
       "steps": int (default 20),
       "prompt": str | null,                 # face prompt override
@@ -64,7 +61,6 @@ import runpod
 _VOL = "/runpod-volume/models" if os.path.isdir("/runpod-volume") else "/models"
 MODEL_PATH = f"{_VOL}/cyberrealistic-pony-v8-sdxl"
 LORA_DIR = f"{_VOL}/loras/sdxl"
-IP_ADAPTER_DIR = f"{_VOL}/ip-adapter-sdxl"
 VAE_PATH = f"{_VOL}/sdxl-vae-fp16-fix"
 FACE_MODEL_PATH = f"{_VOL}/yolo/face_yolov8n.pt"
 
@@ -119,22 +115,7 @@ def _ensure_models():
     else:
         log.info("VAE found at %s", VAE_PATH)
 
-    # 4. IP-Adapter (public, ~3.2GB)
-    _ip_adapter_file = os.path.join(IP_ADAPTER_DIR, "sdxl_models",
-                                     "ip-adapter-plus-face_sdxl_vit-h.safetensors")
-    if not os.path.exists(_ip_adapter_file):
-        log.info("Downloading IP-Adapter Plus Face...")
-        snapshot_download(
-            "h94/IP-Adapter",
-            allow_patterns=["sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors",
-                           "models/image_encoder/*"],
-            local_dir=IP_ADAPTER_DIR, local_dir_use_symlinks=False,
-        )
-        log.info("IP-Adapter downloaded")
-    else:
-        log.info("IP-Adapter found at %s", IP_ADAPTER_DIR)
-
-    # 5. YOLO face detection (~6MB) — optional, ADetailer won't work without it
+    # 4. YOLO face detection (~6MB) — optional, ADetailer won't work without it
     if not os.path.exists(FACE_MODEL_PATH):
         log.info("Downloading YOLOv8n face model...")
         os.makedirs(os.path.dirname(FACE_MODEL_PATH), exist_ok=True)
@@ -159,29 +140,76 @@ LORA_CONFIG = {
     "pony_detail": ("pony_detail_v2.safetensors",          0.5),
 }
 
-# Dropped score_7_up to save 3 CLIP tokens — score_9 + score_8_up already set quality bar
-PONY_QUALITY_PREFIX = (
-    "score_9, score_8_up, source_pony, "
-)
-
-DEFAULT_NEGATIVE = (
-    "score_1, score_2, score_3, score_4, score_5, score_6, "
-    "tan lines, bikini lines, "
-    "close-up, face only, head only, extreme close-up, portrait only, headshot, "
-    "(bad anatomy:1.3), (bad hands:1.3), (deformed:1.2), ugly, blurry, "
-    "(extra fingers:1.3), (missing fingers:1.3), (too many fingers:1.3), (fused fingers:1.3), "
-    "(mutated hands:1.2), (malformed hands:1.2), wrong number of fingers, "
-    "(bad eyes:1.4), (asymmetric eyes:1.3), (uneven eyes:1.3), cross-eyed, "
-    "(dead eyes:1.3), (empty eyes:1.2), (glowing eyes:1.2), (misaligned pupils:1.3), "
-    "(wonky eyes:1.2), (different sized eyes:1.2), "
-    "clean shaven, dark hair, black hair, brown hair, young man, teenager, "
-    "source_cartoon, source_anime, source_furry, "
-    "(anime:1.4), (cartoon:1.4), (3d render:1.3), (illustration:1.3), "
-    "painting, drawing, digital art, CGI, "
-    "text, watermark, username, censored, monochrome, "
-    "extra limbs, missing limbs, extra arms, extra legs, "
-    "overexposed, underexposed, plastic skin, airbrushed"
-)
+# ── Style Presets ─────────────────────────────────────────────────
+# Each preset has a quality prefix and base negative. Pony Diffusion uses
+# special source_* training tokens: source_pony=photo, source_anime=anime, etc.
+# All negatives are ≤48 CLIP tokens, leaving ~25 for per-agent negatives.
+STYLE_PRESETS = {
+    "realistic": {
+        "quality_prefix": "score_9, score_8_up, source_pony, photorealistic, ",
+        "negative": (
+            "score_1, score_2, score_3, score_4, score_5, score_6, "
+            "source_cartoon, source_anime, source_furry, "
+            "anime, cartoon, 3d render, illustration, painting, drawing, "
+            "bad anatomy, bad hands, extra fingers, bad eyes, asymmetric eyes, "
+            "extra limbs, missing limbs, deformed, ugly, blurry, "
+            "text, watermark, monochrome, censored, "
+            "overexposed, underexposed, plastic skin"
+        ),
+    },
+    "anime": {
+        "quality_prefix": "score_9, score_8_up, source_anime, anime style, detailed anime, ",
+        "negative": (
+            "score_1, score_2, score_3, score_4, score_5, score_6, "
+            "source_pony, source_furry, "
+            "photograph, photorealistic, realistic, 3d render, "
+            "bad anatomy, bad hands, extra fingers, "
+            "extra limbs, missing limbs, deformed, ugly, blurry, "
+            "text, watermark, monochrome, censored"
+        ),
+    },
+    "cartoon": {
+        "quality_prefix": "score_9, score_8_up, source_cartoon, cartoon style, vibrant colors, ",
+        "negative": (
+            "score_1, score_2, score_3, score_4, score_5, score_6, "
+            "source_pony, source_furry, "
+            "photograph, photorealistic, realistic, "
+            "bad anatomy, extra fingers, "
+            "extra limbs, deformed, ugly, blurry, "
+            "text, watermark"
+        ),
+    },
+    "oil_painting": {
+        "quality_prefix": "score_9, score_8_up, source_pony, oil painting, masterpiece, classical art, ",
+        "negative": (
+            "score_1, score_2, score_3, score_4, score_5, score_6, "
+            "source_anime, source_cartoon, source_furry, "
+            "photograph, anime, cartoon, "
+            "bad anatomy, extra fingers, deformed, ugly, blurry, "
+            "text, watermark"
+        ),
+    },
+    "watercolor": {
+        "quality_prefix": "score_9, score_8_up, source_pony, watercolor painting, soft edges, ",
+        "negative": (
+            "score_1, score_2, score_3, score_4, score_5, score_6, "
+            "source_anime, source_cartoon, source_furry, "
+            "photograph, anime, cartoon, sharp lines, "
+            "bad anatomy, extra fingers, deformed, ugly, blurry, "
+            "text, watermark"
+        ),
+    },
+    "comic": {
+        "quality_prefix": "score_9, score_8_up, source_cartoon, comic book style, bold lines, cel shading, ",
+        "negative": (
+            "score_1, score_2, score_3, score_4, score_5, score_6, "
+            "source_pony, source_furry, "
+            "photograph, photorealistic, realistic, "
+            "bad anatomy, extra fingers, deformed, ugly, blurry, "
+            "text, watermark"
+        ),
+    },
+}
 
 MULTI_CHAR_NEGATIVE = (
     "merged bodies, fused bodies, conjoined, conjoined twins, "
@@ -193,7 +221,6 @@ MULTI_CHAR_NEGATIVE = (
 )
 
 FREEU_S1, FREEU_S2, FREEU_B1, FREEU_B2 = 0.6, 0.4, 1.1, 1.2
-IP_ADAPTER_SCALE = 0.5
 
 log = logging.getLogger("sdxl-worker")
 logging.basicConfig(
@@ -207,7 +234,6 @@ _pipe = None
 _img2img_pipe = None
 _face_model = None
 _pipe_lock = threading.Lock()
-_ip_adapter_loaded = False
 _gen_count = 0
 _torch = None
 _Image = None
@@ -232,7 +258,7 @@ def _pil_to_b64(img):
 
 def _load_pipeline():
     """Load the full SDXL pipeline with all enhancements. Called once at container startup."""
-    global _pipe, _img2img_pipe, _face_model, _ip_adapter_loaded, _torch, _Image
+    global _pipe, _img2img_pipe, _face_model, _torch, _Image
 
     import torch
     from diffusers import (
@@ -249,33 +275,9 @@ def _load_pipeline():
     t0 = time.time()
     log.info("Loading CyberRealistic Pony v8 SDXL pipeline (CUDA)...")
 
-    # Check if IP-Adapter files exist
-    encoder_path = os.path.join(IP_ADAPTER_DIR, "models", "image_encoder")
-    adapter_file = os.path.join(
-        IP_ADAPTER_DIR, "sdxl_models",
-        "ip-adapter-plus-face_sdxl_vit-h.safetensors",
+    pipe = StableDiffusionXLPipeline.from_pretrained(
+        MODEL_PATH, torch_dtype=torch.float16, use_safetensors=True,
     )
-    has_ip_adapter = os.path.exists(encoder_path) and os.path.exists(adapter_file)
-
-    # Load pipeline with or without image encoder
-    if has_ip_adapter:
-        from transformers import CLIPVisionModelWithProjection
-
-        log.info("Loading CLIP ViT-H image encoder for IP-Adapter...")
-        image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-            encoder_path, torch_dtype=torch.float16,
-        )
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            MODEL_PATH,
-            image_encoder=image_encoder,
-            torch_dtype=torch.float16,
-            use_safetensors=True,
-        )
-    else:
-        log.info("IP-Adapter files not found, loading without face consistency")
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            MODEL_PATH, torch_dtype=torch.float16, use_safetensors=True,
-        )
 
     # Scheduler — Euler Ancestral (matches CyberRealistic Pony v8 community standard)
     pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
@@ -312,18 +314,6 @@ def _load_pipeline():
         adapter_weights = [LORA_CONFIG[n][1] for n in loaded]
         pipe.set_adapters(loaded, adapter_weights=adapter_weights)
 
-    # IP-Adapter
-    if has_ip_adapter:
-        log.info("Loading IP-Adapter Plus Face...")
-        pipe.load_ip_adapter(
-            IP_ADAPTER_DIR,
-            subfolder="sdxl_models",
-            weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
-        )
-        pipe.set_ip_adapter_scale(IP_ADAPTER_SCALE)
-        _ip_adapter_loaded = True
-        log.info("IP-Adapter loaded (default scale=%.2f)", IP_ADAPTER_SCALE)
-
     # Img2Img pipeline (shares components with txt2img, used by ADetailer)
     _img2img_pipe = StableDiffusionXLImg2ImgPipeline(
         vae=pipe.vae,
@@ -333,8 +323,6 @@ def _load_pipeline():
         tokenizer_2=pipe.tokenizer_2,
         unet=pipe.unet,
         scheduler=pipe.scheduler,
-        image_encoder=getattr(pipe, "image_encoder", None),
-        feature_extractor=getattr(pipe, "feature_extractor", None),
     )
     _img2img_pipe = _img2img_pipe.to("cuda")
     log.info("Img2Img pipeline ready (shared components, for ADetailer)")
@@ -349,8 +337,8 @@ def _load_pipeline():
     t_load = time.time() - t0
     _pipe = pipe
     log.info(
-        "Pipeline ready in %.1fs (LoRAs=%d, IP-Adapter=%s, FreeU=True, ADetailer=%s)",
-        t_load, len(loaded), _ip_adapter_loaded, _face_model is not None,
+        "Pipeline ready in %.1fs (LoRAs=%d, FreeU=True, ADetailer=%s)",
+        t_load, len(loaded), _face_model is not None,
     )
 
 
@@ -367,17 +355,15 @@ def _generate(params):
     cfg = params.get("cfg", 6.0)
     seed = params.get("seed")
     negative = params.get("negative")
-    face_ref_b64 = params.get("face_refs_b64") or params.get("face_ref_b64")
-    face_scale = params.get("face_scale", IP_ADAPTER_SCALE)
-    mask_mode = params.get("mask_mode", "horizontal")
+    style = params.get("style", "realistic")
 
     if not prompt:
         return {"error": "Empty prompt"}
 
-    # Build full prompt — quality prefix prepended
-    full_prompt = PONY_QUALITY_PREFIX + prompt
-    # Append custom negative to default (don't replace — default has critical tags)
-    neg = DEFAULT_NEGATIVE + (", " + negative if negative else "")
+    # ── Style preset lookup ──────────────────────────────────────────
+    preset = STYLE_PRESETS.get(style, STYLE_PRESETS["realistic"])
+    full_prompt = preset["quality_prefix"] + prompt
+    neg = preset["negative"] + (", " + negative if negative else "")
 
     # ── Token count + hard trim to 75 tokens (CLIP limit) ──────────
     try:
@@ -385,7 +371,6 @@ def _generate(params):
         _ids = _tok(full_prompt, truncation=False, add_special_tokens=False)["input_ids"]
         _exact_tokens = len(_ids)
         if _exact_tokens > 75:
-            # Trim from end (lowest priority tags get cut)
             _trimmed_ids = _ids[:75]
             full_prompt = _tok.decode(_trimmed_ids, skip_special_tokens=True)
             log.warning("CLIP tokens: %d/75 — trimmed last %d tokens", _exact_tokens, _exact_tokens - 75)
@@ -393,25 +378,6 @@ def _generate(params):
             log.info("CLIP tokens: %d/75", _exact_tokens)
     except Exception:
         pass
-
-    # Decode face reference images from base64
-    face_images = []
-    if face_ref_b64 and _ip_adapter_loaded:
-        # Accept single string or list of strings
-        if isinstance(face_ref_b64, str):
-            face_ref_b64 = [face_ref_b64]
-        for b64_str in face_ref_b64:
-            if b64_str:
-                try:
-                    face_images.append(_b64_to_pil(b64_str))
-                    log.info("Face ref decoded from base64 (%d bytes)", len(b64_str))
-                except Exception as e:
-                    log.warning("Failed to decode face ref: %s", e)
-
-    # Multi-character: add body-merging negatives when 2+ face refs
-    if len(face_images) >= 2:
-        neg = neg + ", " + MULTI_CHAR_NEGATIVE
-        log.info("Multi-char negative enabled (%d faces)", len(face_images))
 
     # Seed
     if seed is None:
@@ -421,19 +387,11 @@ def _generate(params):
         _gen_count += 1
         gen_id = _gen_count
 
-        # Adjust IP-Adapter scale
-        if _ip_adapter_loaded and face_images:
-            _pipe.set_ip_adapter_scale(face_scale)
-        elif _ip_adapter_loaded:
-            # No face ref — scale 0.0 (dummy image to satisfy UNet image_embeds)
-            _pipe.set_ip_adapter_scale(0.0)
-
         generator = _torch.Generator("cuda").manual_seed(seed)
 
-        ip_str = " ip=%.2f" % face_scale if face_images else ""
         log.info(
-            "[gen #%d] %dx%d, %d steps, cfg=%.1f, seed=%d%s -- %s",
-            gen_id, width, height, steps, cfg, seed, ip_str, prompt[:100],
+            "[gen #%d] %dx%d, %d steps, cfg=%.1f, seed=%d, style=%s -- %s",
+            gen_id, width, height, steps, cfg, seed, style, prompt[:100],
         )
 
         t0 = time.time()
@@ -448,96 +406,14 @@ def _generate(params):
             generator=generator,
         )
 
-        # IP-Adapter: pass face images or a dummy blank when none provided
-        # UNet requires image_embeds once adapter weights are loaded (diffusers 0.36+)
-        if _ip_adapter_loaded and not face_images:
-            gen_kwargs["ip_adapter_image"] = _Image.new("RGB", (224, 224), (128, 128, 128))
-
-        if face_images and _ip_adapter_loaded:
-            if len(face_images) > 1:
-                # Multi-face: gradient masks with soft transitions to prevent face blending
-                # "horizontal" = side-by-side (left/right) -- standing, side view
-                # "vertical" = stacked (top/bottom) -- missionary, cowgirl, from above
-                import numpy as _np
-                from PIL import ImageFilter as _ImageFilter
-
-                _n = len(face_images)
-                _masks = []
-                # Gap ratio -- dead zone between masks where neither face dominates
-                _gap = 0.08  # 8% of dimension is neutral zone
-                _blur_radius = max(width, height) // 12  # Soft Gaussian edge
-
-                for _i in range(_n):
-                    _mask = _Image.new("L", (width, height), 0)
-                    if mask_mode == "vertical":
-                        # Top/bottom with gap + soft edges
-                        _slice = (1.0 - _gap * (_n - 1)) / _n
-                        _y0 = int(height * (_i * (_slice + _gap)))
-                        _y1 = int(height * (_i * (_slice + _gap) + _slice))
-                        _y0 = max(0, _y0)
-                        _y1 = min(height, _y1)
-                        from PIL import ImageDraw as _IDraw
-
-                        _IDraw.Draw(_mask).rectangle([0, _y0, width, _y1], fill=255)
-                    else:
-                        # Left/right with gap + soft edges
-                        _slice = (1.0 - _gap * (_n - 1)) / _n
-                        _x0 = int(width * (_i * (_slice + _gap)))
-                        _x1 = int(width * (_i * (_slice + _gap) + _slice))
-                        _x0 = max(0, _x0)
-                        _x1 = min(width, _x1)
-                        from PIL import ImageDraw as _IDraw
-
-                        _IDraw.Draw(_mask).rectangle([_x0, 0, _x1, height], fill=255)
-                    # Gaussian blur for soft gradient edges
-                    _mask = _mask.filter(_ImageFilter.GaussianBlur(radius=_blur_radius))
-                    _masks.append(_mask)
-
-                log.info(
-                    "[gen #%d] Soft-gradient masking mode=%s, gap=%.0f%%, blur=%d",
-                    gen_id, mask_mode, _gap * 100, _blur_radius,
-                )
-
-                # Process masks to latent space (height//8, width//8)
-                import torchvision.transforms.functional as _TF
-
-                _lh, _lw = height // 8, width // 8
-                _mt = []
-                for _m in _masks:
-                    _t = _TF.to_tensor(
-                        _m.resize((_lw, _lh), _Image.BILINEAR)
-                    ).squeeze(0)
-                    _mt.append(_t)
-                _processed = _torch.stack(_mt).unsqueeze(0)  # (1, n, lh, lw)
-
-                gen_kwargs["ip_adapter_image"] = [face_images]
-                gen_kwargs["cross_attention_kwargs"] = {
-                    "ip_adapter_masks": [_processed.to("cuda")]
-                }
-                _pipe.set_ip_adapter_scale([[face_scale] * _n])
-                log.info(
-                    "[gen #%d] Soft-gradient masking: %d faces, scale=%.2f each",
-                    gen_id, _n, face_scale,
-                )
-            else:
-                # Single face -- existing behavior
-                gen_kwargs["ip_adapter_image"] = face_images[0]
-
         try:
             image = _pipe(**gen_kwargs).images[0]
         except Exception as gen_err:
             t_gen = time.time() - t0
             log.error("[gen #%d] Failed in %.1fs: %s", gen_id, t_gen, gen_err)
-            # Reset IP-Adapter scale to default so next gen isn't affected
-            if _ip_adapter_loaded:
-                _pipe.set_ip_adapter_scale(IP_ADAPTER_SCALE)
             return {"error": "Generation failed: %s" % str(gen_err)}
 
         t_gen = time.time() - t0
-
-        # Reset IP-Adapter scale to default after multi-face generation
-        if _ip_adapter_loaded and face_images and len(face_images) > 1:
-            _pipe.set_ip_adapter_scale(IP_ADAPTER_SCALE)
 
     # Encode to base64
     image_b64 = _pil_to_b64(image)
@@ -552,9 +428,8 @@ def _generate(params):
         "width": width,
         "height": height,
         "seed": seed,
+        "style": style,
         "gen_time": round(t_gen, 1),
-        "ip_adapter": bool(face_images),
-        "face_scale": face_scale if face_images else None,
         "freeu": True,
     }
 
@@ -562,18 +437,17 @@ def _generate(params):
 # ── ADetailer ────────────────────────────────────────────────────────
 
 def _adetail(params):
-    """ADetailer: detect faces, crop each, img2img with face ref, Poisson-blend back.
+    """ADetailer: detect faces, crop each, img2img with text prompt, Poisson-blend back.
 
-    Uses OpenCV seamlessClone for invisible boundaries. Crop-based img2img avoids
-    inpainting issues. Only processes as many faces as references provided.
+    Uses OpenCV seamlessClone for invisible boundaries. Crop-based img2img with
+    text-only face prompts (no IP-Adapter). Low denoise preserves skin/lighting.
 
     Params (in input dict):
         image_b64: base64-encoded source image
-        face_refs_b64: list of base64-encoded face reference images (left-to-right order)
-        face_scale: IP-Adapter scale (default 0.55)
+        face_prompt: text prompt for face refinement (from character looks YAML)
         denoise: denoising strength (default 0.25)
         steps: img2img steps (default 20)
-        prompt: optional face prompt override
+        prompt: optional face prompt override (alias for face_prompt)
         padding: bbox expansion multiplier (default 2.5)
         conf: YOLO confidence threshold (default 0.40)
     """
@@ -581,11 +455,9 @@ def _adetail(params):
     import numpy as np
 
     image_b64 = params.get("image_b64", "")
-    face_refs_b64 = params.get("face_refs_b64", [])
-    face_scale = params.get("face_scale", 0.55)
     denoise = params.get("denoise", 0.25)
     steps = params.get("steps", 20)
-    face_prompt = params.get("prompt")
+    face_prompt = params.get("face_prompt") or params.get("prompt")
     padding_mult = params.get("padding", 2.5)
     conf_thresh = params.get("conf", 0.40)
 
@@ -593,8 +465,8 @@ def _adetail(params):
         return {"error": "No image_b64 provided"}
     if not _face_model:
         return {"error": "Face detection model not loaded"}
-    if not _img2img_pipe or not _ip_adapter_loaded:
-        return {"error": "Img2Img pipeline or IP-Adapter not ready"}
+    if not _img2img_pipe:
+        return {"error": "Img2Img pipeline not ready"}
 
     # Decode source image
     src_image = _b64_to_pil(image_b64)
@@ -620,61 +492,38 @@ def _adetail(params):
     # Sort left-to-right
     faces.sort(key=lambda f: (f[0] + f[2]) / 2)
 
-    # Decode face references
-    if isinstance(face_refs_b64, str):
-        face_refs_b64 = [face_refs_b64]
-    ref_images = []
-    for b64_str in face_refs_b64:
-        if b64_str:
-            try:
-                ref_images.append(_b64_to_pil(b64_str))
-            except Exception:
-                ref_images.append(None)
-        else:
-            ref_images.append(None)
-
-    # Only process min(faces, references)
-    num_to_fix = min(len(faces), len(ref_images))
-    log.info(
-        "[adetail] Detected %d faces, have %d refs, will fix %d",
-        len(faces), len(ref_images), num_to_fix,
-    )
-
     if not face_prompt:
+        _preset = STYLE_PRESETS["realistic"]
         face_prompt = (
-            PONY_QUALITY_PREFIX
+            _preset["quality_prefix"]
             + "1person, detailed face, beautiful eyes, sharp detailed eyes, "
-            "symmetric eyes, realistic eyes, (detailed skin:1.2), "
+            "symmetric eyes, realistic eyes, detailed skin, "
             "photorealistic face, sharp focus"
         )
 
     face_neg = (
-        "(bad eyes:1.4), asymmetric eyes, uneven eyes, misaligned eyes, cross-eyed, "
+        "bad eyes, asymmetric eyes, uneven eyes, misaligned eyes, cross-eyed, "
         "wonky eyes, glowing eyes, dead eyes, empty eyes, extra eyes, "
         "deformed face, ugly face, blurry face, poorly drawn face, "
         "bad anatomy, mutation, disfigured, extra fingers, missing fingers"
     )
 
+    num_to_fix = len(faces)
+    log.info("[adetail] Detected %d faces, will fix all with text prompt", num_to_fix)
+
     fixed_count = 0
     errors = []
-    # Work in OpenCV (BGR numpy) for Poisson blending
     current_cv = cv2.cvtColor(np.array(src_image), cv2.COLOR_RGB2BGR)
 
     with _pipe_lock:
-        # Upcast to float32 for img2img (avoids fp16 precision issues on face crops)
         _img2img_pipe.to(dtype=_torch.float32)
 
         for i in range(num_to_fix):
             x1, y1, x2, y2, conf = faces[i]
-            ref_img = ref_images[i]
-            if ref_img is None:
-                log.info("[adetail] No ref for face %d, skipping", i)
-                continue
 
             face_w = x2 - x1
             face_h = y2 - y1
 
-            # Generous padding -- capture hair, ears, neck, forehead
             pad_x = face_w * (padding_mult - 1) / 2
             pad_y = face_h * (padding_mult - 1) / 2
             cx1 = max(0, int(x1 - pad_x))
@@ -685,19 +534,16 @@ def _adetail(params):
             crop_w = cx2 - cx1
             crop_h = cy2 - cy1
 
-            # Keep aspect ratio, round to nearest 8, min 512
             scale = max(512 / min(crop_w, crop_h), 1.0)
             target_w = ((int(crop_w * scale) + 7) // 8) * 8
             target_h = ((int(crop_h * scale) + 7) // 8) * 8
             target_w = min(768, max(512, target_w))
             target_h = min(768, max(512, target_h))
 
-            # Crop from PIL image (current state)
             current_pil = _Image.fromarray(cv2.cvtColor(current_cv, cv2.COLOR_BGR2RGB))
             face_crop = current_pil.crop((cx1, cy1, cx2, cy2))
             face_crop_resized = face_crop.resize((target_w, target_h), _Image.LANCZOS)
 
-            _img2img_pipe.set_ip_adapter_scale(face_scale)
             gen = _torch.Generator("cuda").manual_seed(42 + i)
 
             log.info(
@@ -711,33 +557,25 @@ def _adetail(params):
                     prompt=face_prompt,
                     negative_prompt=face_neg,
                     image=face_crop_resized,
-                    ip_adapter_image=ref_img,
                     num_inference_steps=steps,
                     guidance_scale=6.0,
                     strength=denoise,
                     generator=gen,
                 ).images[0]
 
-                # Resize back to original crop dimensions
                 fixed_crop = fixed_crop.resize((crop_w, crop_h), _Image.LANCZOS)
                 fixed_cv = cv2.cvtColor(np.array(fixed_crop), cv2.COLOR_RGB2BGR)
 
-                # Poisson blending (seamlessClone) for invisible boundaries
-                # Create elliptical mask for the face region within the crop
                 mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
                 margin_x = int(crop_w * 0.10)
                 margin_y = int(crop_h * 0.10)
                 center = (crop_w // 2, crop_h // 2)
                 axes = ((crop_w // 2) - margin_x, (crop_h // 2) - margin_y)
                 cv2.ellipse(mask, center, axes, 0, 0, 360, 255, -1)
-                # Slight blur for smooth transition
                 mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=max(3, crop_w * 0.03))
                 _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
 
-                # Center point in the destination image for seamlessClone
                 dest_center = (cx1 + crop_w // 2, cy1 + crop_h // 2)
-
-                # NORMAL_CLONE preserves source lighting
                 current_cv = cv2.seamlessClone(
                     fixed_cv, current_cv, mask, dest_center, cv2.NORMAL_CLONE,
                 )
@@ -750,11 +588,8 @@ def _adetail(params):
                 errors.append(str(e))
                 continue
 
-        # Convert back to float16 for normal generation
         _img2img_pipe.to(dtype=_torch.float16)
-        _img2img_pipe.set_ip_adapter_scale(IP_ADAPTER_SCALE)
 
-    # Convert back to PIL and encode
     result_image = _Image.fromarray(cv2.cvtColor(current_cv, cv2.COLOR_BGR2RGB))
     image_b64 = _pil_to_b64(result_image)
 
@@ -764,7 +599,6 @@ def _adetail(params):
         "image_b64": image_b64,
         "faces_detected": len(faces),
         "faces_fixed": fixed_count,
-        "face_scale": face_scale,
         "denoise": denoise,
         "steps": steps,
         "errors": errors if errors else None,
