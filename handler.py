@@ -159,8 +159,9 @@ LORA_CONFIG = {
     "pony_detail": ("pony_detail_v2.safetensors",          0.5),
 }
 
+# Dropped score_7_up to save 3 CLIP tokens — score_9 + score_8_up already set quality bar
 PONY_QUALITY_PREFIX = (
-    "score_9, score_8_up, score_7_up, source_pony, "
+    "score_9, score_8_up, source_pony, "
 )
 
 DEFAULT_NEGATIVE = (
@@ -378,43 +379,20 @@ def _generate(params):
     # Append custom negative to default (don't replace — default has critical tags)
     neg = DEFAULT_NEGATIVE + (", " + negative if negative else "")
 
-    # ── Long prompt encoding via sd_embed ──────────────────────────
-    # Breaks the 77-token CLIP limit by chunking into 75-token groups,
-    # encoding each through both SDXL text encoders, and concatenating.
-    # This means ALL tags get full attention weight — no truncation.
-    _prompt_embeds = None
-    _negative_embeds = None
-    _pooled_embeds = None
-    _negative_pooled = None
+    # ── Token count + hard trim to 75 tokens (CLIP limit) ──────────
     try:
-        from sd_embed.embedding_funcs import get_weighted_text_embeddings_sdxl
-        _prompt_embeds, _negative_embeds, _pooled_embeds, _negative_pooled = \
-            get_weighted_text_embeddings_sdxl(
-                pipe=_pipe,
-                prompt=full_prompt,
-                neg_prompt=neg,
-            )
-        # Token count for logging (informational — no truncation now)
         _tok = _pipe.tokenizer
         _ids = _tok(full_prompt, truncation=False, add_special_tokens=False)["input_ids"]
         _exact_tokens = len(_ids)
-        _n_chunks = (_exact_tokens + 74) // 75
-        log.info("CLIP tokens: %d -> %d chunk(s) (long prompt, no truncation)", _exact_tokens, _n_chunks)
-    except ImportError:
-        log.warning("sd_embed not available, falling back to standard 77-token prompt")
-        # Token count with warning
-        try:
-            _tok = _pipe.tokenizer
-            _ids = _tok(full_prompt, truncation=False, add_special_tokens=False)["input_ids"]
-            _exact_tokens = len(_ids)
-            if _exact_tokens > 75:
-                log.warning("CLIP tokens: %d/75 -- TRUNCATING %d tokens", _exact_tokens, _exact_tokens - 75)
-            else:
-                log.info("CLIP tokens: %d/75", _exact_tokens)
-        except Exception:
-            pass
-    except Exception as _embed_err:
-        log.warning("sd_embed failed: %s, falling back to standard prompt", _embed_err)
+        if _exact_tokens > 75:
+            # Trim from end (lowest priority tags get cut)
+            _trimmed_ids = _ids[:75]
+            full_prompt = _tok.decode(_trimmed_ids, skip_special_tokens=True)
+            log.warning("CLIP tokens: %d/75 — trimmed last %d tokens", _exact_tokens, _exact_tokens - 75)
+        else:
+            log.info("CLIP tokens: %d/75", _exact_tokens)
+    except Exception:
+        pass
 
     # Decode face reference images from base64
     face_images = []
@@ -460,29 +438,15 @@ def _generate(params):
 
         t0 = time.time()
 
-        # Use pre-computed embeddings (long prompt) or fallback to string prompt
-        if _prompt_embeds is not None:
-            gen_kwargs = dict(
-                prompt_embeds=_prompt_embeds,
-                negative_prompt_embeds=_negative_embeds,
-                pooled_prompt_embeds=_pooled_embeds,
-                negative_pooled_prompt_embeds=_negative_pooled,
-                num_inference_steps=steps,
-                guidance_scale=cfg,
-                width=width,
-                height=height,
-                generator=generator,
-            )
-        else:
-            gen_kwargs = dict(
-                prompt=full_prompt,
-                negative_prompt=neg,
-                num_inference_steps=steps,
-                guidance_scale=cfg,
-                width=width,
-                height=height,
-                generator=generator,
-            )
+        gen_kwargs = dict(
+            prompt=full_prompt,
+            negative_prompt=neg,
+            num_inference_steps=steps,
+            guidance_scale=cfg,
+            width=width,
+            height=height,
+            generator=generator,
+        )
 
         # IP-Adapter: pass face images or a dummy blank when none provided
         # UNet requires image_embeds once adapter weights are loaded (diffusers 0.36+)
