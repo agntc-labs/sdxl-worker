@@ -374,25 +374,48 @@ def _generate(params):
     if not prompt:
         return {"error": "Empty prompt"}
 
-    # Build full prompt — quality prefix only (saves CLIP token budget)
+    # Build full prompt — quality prefix prepended
     full_prompt = PONY_QUALITY_PREFIX + prompt
     # Append custom negative to default (don't replace — default has critical tags)
     neg = DEFAULT_NEGATIVE + (", " + negative if negative else "")
 
-    # CLIP token monitoring
+    # ── Long prompt encoding via sd_embed ──────────────────────────
+    # Breaks the 77-token CLIP limit by chunking into 75-token groups,
+    # encoding each through both SDXL text encoders, and concatenating.
+    # This means ALL tags get full attention weight — no truncation.
+    _prompt_embeds = None
+    _negative_embeds = None
+    _pooled_embeds = None
+    _negative_pooled = None
     try:
+        from sd_embed.embedding_funcs import get_weighted_text_embeddings_sdxl
+        _prompt_embeds, _negative_embeds, _pooled_embeds, _negative_pooled = \
+            get_weighted_text_embeddings_sdxl(
+                pipe=_pipe,
+                prompt=full_prompt,
+                neg_prompt=neg,
+            )
+        # Token count for logging (informational — no truncation now)
         _tok = _pipe.tokenizer
         _ids = _tok(full_prompt, truncation=False, add_special_tokens=False)["input_ids"]
         _exact_tokens = len(_ids)
-        if _exact_tokens > 75:
-            log.warning(
-                "CLIP tokens: %d/75 -- SDXL will truncate last %d tokens",
-                _exact_tokens, _exact_tokens - 75,
-            )
-        else:
-            log.info("CLIP tokens: %d/75", _exact_tokens)
-    except Exception as _te:
-        log.info("Token count unavailable: %s", _te)
+        _n_chunks = (_exact_tokens + 74) // 75
+        log.info("CLIP tokens: %d -> %d chunk(s) (long prompt, no truncation)", _exact_tokens, _n_chunks)
+    except ImportError:
+        log.warning("sd_embed not available, falling back to standard 77-token prompt")
+        # Token count with warning
+        try:
+            _tok = _pipe.tokenizer
+            _ids = _tok(full_prompt, truncation=False, add_special_tokens=False)["input_ids"]
+            _exact_tokens = len(_ids)
+            if _exact_tokens > 75:
+                log.warning("CLIP tokens: %d/75 -- TRUNCATING %d tokens", _exact_tokens, _exact_tokens - 75)
+            else:
+                log.info("CLIP tokens: %d/75", _exact_tokens)
+        except Exception:
+            pass
+    except Exception as _embed_err:
+        log.warning("sd_embed failed: %s, falling back to standard prompt", _embed_err)
 
     # Decode face reference images from base64
     face_images = []
@@ -438,15 +461,29 @@ def _generate(params):
 
         t0 = time.time()
 
-        gen_kwargs = dict(
-            prompt=full_prompt,
-            negative_prompt=neg,
-            num_inference_steps=steps,
-            guidance_scale=cfg,
-            width=width,
-            height=height,
-            generator=generator,
-        )
+        # Use pre-computed embeddings (long prompt) or fallback to string prompt
+        if _prompt_embeds is not None:
+            gen_kwargs = dict(
+                prompt_embeds=_prompt_embeds,
+                negative_prompt_embeds=_negative_embeds,
+                pooled_prompt_embeds=_pooled_embeds,
+                negative_pooled_prompt_embeds=_negative_pooled,
+                num_inference_steps=steps,
+                guidance_scale=cfg,
+                width=width,
+                height=height,
+                generator=generator,
+            )
+        else:
+            gen_kwargs = dict(
+                prompt=full_prompt,
+                negative_prompt=neg,
+                num_inference_steps=steps,
+                guidance_scale=cfg,
+                width=width,
+                height=height,
+                generator=generator,
+            )
 
         # IP-Adapter: pass face images or a dummy blank when none provided
         # UNet requires image_embeds once adapter weights are loaded (diffusers 0.36+)
