@@ -378,7 +378,8 @@ def _generate(params):
 
     # Build full prompt — quality prefix only (saves CLIP token budget)
     full_prompt = PONY_QUALITY_PREFIX + prompt
-    neg = negative or DEFAULT_NEGATIVE
+    # Append custom negative to default (don't replace — default has critical tags)
+    neg = DEFAULT_NEGATIVE + (", " + negative if negative else "")
 
     # CLIP token monitoring
     try:
