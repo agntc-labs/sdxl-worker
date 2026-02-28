@@ -138,28 +138,25 @@ LORA_CONFIG = {
     "pony_detail": ("pony_detail_v2.safetensors",          0.5),
 }
 
-# Dropped score_7_up to save 3 CLIP tokens — score_9 + score_8_up already set quality bar
+# Realism tokens in prefix — critical for CyberRealistic Pony to produce photorealistic output
 PONY_QUALITY_PREFIX = (
-    "score_9, score_8_up, source_pony, "
+    "score_9, score_8_up, score_7_up, source_pony, rating_explicit, "
+    "(photorealistic:1.4), (realistic skin texture:1.2), "
 )
 
+# CRITICAL: CLIP hard limit = 75 tokens. Tags beyond 75 are INVISIBLE.
+# Anti-style tags FIRST (most important for realism), then anatomy, then cosmetic.
+# Trimmed to ~65 words so per-agent additions (~10 words) still fit within 75 tokens.
 DEFAULT_NEGATIVE = (
     "score_1, score_2, score_3, score_4, score_5, score_6, "
-    "tan lines, bikini lines, "
-    "close-up, face only, head only, extreme close-up, portrait only, headshot, "
-    "(bad anatomy:1.3), (bad hands:1.3), (deformed:1.2), ugly, blurry, "
-    "(extra fingers:1.3), (missing fingers:1.3), (too many fingers:1.3), (fused fingers:1.3), "
-    "(mutated hands:1.2), (malformed hands:1.2), wrong number of fingers, "
-    "(bad eyes:1.4), (asymmetric eyes:1.3), (uneven eyes:1.3), cross-eyed, "
-    "(dead eyes:1.3), (empty eyes:1.2), (glowing eyes:1.2), (misaligned pupils:1.3), "
-    "(wonky eyes:1.2), (different sized eyes:1.2), "
-    "clean shaven, dark hair, black hair, brown hair, young man, teenager, "
     "source_cartoon, source_anime, source_furry, "
     "(anime:1.4), (cartoon:1.4), (3d render:1.3), (illustration:1.3), "
     "painting, drawing, digital art, CGI, "
-    "text, watermark, username, censored, monochrome, "
-    "extra limbs, missing limbs, extra arms, extra legs, "
-    "overexposed, underexposed, plastic skin, airbrushed"
+    "(tan lines:1.5), (bikini lines:1.5), "
+    "(bad anatomy:1.3), (bad hands:1.3), (deformed:1.2), ugly, blurry, "
+    "(bad eyes:1.4), (extra fingers:1.3), (fused fingers:1.3), "
+    "text, watermark, monochrome, "
+    "extra limbs, missing limbs, plastic skin, airbrushed"
 )
 
 MULTI_CHAR_NEGATIVE = (
