@@ -444,16 +444,15 @@ def _adetail(params):
     faces.sort(key=lambda f: (f[0] + f[2]) / 2)
 
     if not face_prompt:
-        _preset = STYLE_PRESETS["realistic"]
         face_prompt = (
-            _preset["quality_prefix"]
+            PONY_QUALITY_PREFIX
             + "1person, detailed face, beautiful eyes, sharp detailed eyes, "
-            "symmetric eyes, realistic eyes, detailed skin, "
+            "symmetric eyes, realistic eyes, (detailed skin:1.2), "
             "photorealistic face, sharp focus"
         )
 
     face_neg = (
-        "bad eyes, asymmetric eyes, uneven eyes, misaligned eyes, cross-eyed, "
+        "(bad eyes:1.4), asymmetric eyes, uneven eyes, misaligned eyes, cross-eyed, "
         "wonky eyes, glowing eyes, dead eyes, empty eyes, extra eyes, "
         "deformed face, ugly face, blurry face, poorly drawn face, "
         "bad anatomy, mutation, disfigured, extra fingers, missing fingers"
