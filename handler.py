@@ -138,10 +138,12 @@ LORA_CONFIG = {
     "pony_detail": ("pony_detail_v2.safetensors",          0.5),
 }
 
-# Realism tokens in prefix — critical for CyberRealistic Pony to produce photorealistic output
+# Quality prefix — 17 CLIP tokens. Verified with CLIPTokenizer.
+# score_9 + score_8_up pull quality up (score_7_up redundant).
+# source_pony = Pony model quality trigger. photorealistic = realism anchor.
+# No emphasis weights — saves ~4 tokens vs (photorealistic:1.4).
 PONY_QUALITY_PREFIX = (
-    "score_9, score_8_up, score_7_up, source_pony, rating_explicit, "
-    "(photorealistic:1.4), (realistic skin texture:1.2), "
+    "score_9, score_8_up, source_pony, photorealistic, "
 )
 
 # CRITICAL: CLIP hard limit = 75 tokens. Tags beyond 75 are INVISIBLE.
