@@ -140,72 +140,29 @@ LORA_CONFIG = {
     "pony_detail": ("pony_detail_v2.safetensors",          0.5),
 }
 
-# ── Style Presets ─────────────────────────────────────────────────
-# Each preset has a quality prefix and base negative. Pony Diffusion uses
-# special source_* training tokens: source_pony=photo, source_anime=anime, etc.
-# All negatives are ≤48 CLIP tokens, leaving ~25 for per-agent negatives.
-STYLE_PRESETS = {
-    "realistic": {
-        "quality_prefix": "score_9, score_8_up, source_pony, photorealistic, ",
-        "negative": (
-            "score_1, score_2, score_3, score_4, score_5, score_6, "
-            "source_cartoon, source_anime, "
-            "bad anatomy, extra fingers, deformed, ugly, blurry"
-        ),
-    },
-    "anime": {
-        "quality_prefix": "score_9, score_8_up, source_anime, anime style, detailed anime, ",
-        "negative": (
-            "score_1, score_2, score_3, score_4, score_5, score_6, "
-            "source_pony, source_furry, "
-            "photograph, photorealistic, realistic, 3d render, "
-            "bad anatomy, bad hands, extra fingers, "
-            "extra limbs, missing limbs, deformed, ugly, blurry, "
-            "text, watermark, monochrome, censored"
-        ),
-    },
-    "cartoon": {
-        "quality_prefix": "score_9, score_8_up, source_cartoon, cartoon style, vibrant colors, ",
-        "negative": (
-            "score_1, score_2, score_3, score_4, score_5, score_6, "
-            "source_pony, source_furry, "
-            "photograph, photorealistic, realistic, "
-            "bad anatomy, extra fingers, "
-            "extra limbs, deformed, ugly, blurry, "
-            "text, watermark"
-        ),
-    },
-    "oil_painting": {
-        "quality_prefix": "score_9, score_8_up, source_pony, oil painting, masterpiece, classical art, ",
-        "negative": (
-            "score_1, score_2, score_3, score_4, score_5, score_6, "
-            "source_anime, source_cartoon, source_furry, "
-            "photograph, anime, cartoon, "
-            "bad anatomy, extra fingers, deformed, ugly, blurry, "
-            "text, watermark"
-        ),
-    },
-    "watercolor": {
-        "quality_prefix": "score_9, score_8_up, source_pony, watercolor painting, soft edges, ",
-        "negative": (
-            "score_1, score_2, score_3, score_4, score_5, score_6, "
-            "source_anime, source_cartoon, source_furry, "
-            "photograph, anime, cartoon, sharp lines, "
-            "bad anatomy, extra fingers, deformed, ugly, blurry, "
-            "text, watermark"
-        ),
-    },
-    "comic": {
-        "quality_prefix": "score_9, score_8_up, source_cartoon, comic book style, bold lines, cel shading, ",
-        "negative": (
-            "score_1, score_2, score_3, score_4, score_5, score_6, "
-            "source_pony, source_furry, "
-            "photograph, photorealistic, realistic, "
-            "bad anatomy, extra fingers, deformed, ugly, blurry, "
-            "text, watermark"
-        ),
-    },
-}
+# Dropped score_7_up to save 3 CLIP tokens — score_9 + score_8_up already set quality bar
+PONY_QUALITY_PREFIX = (
+    "score_9, score_8_up, source_pony, "
+)
+
+DEFAULT_NEGATIVE = (
+    "score_1, score_2, score_3, score_4, score_5, score_6, "
+    "tan lines, bikini lines, "
+    "close-up, face only, head only, extreme close-up, portrait only, headshot, "
+    "(bad anatomy:1.3), (bad hands:1.3), (deformed:1.2), ugly, blurry, "
+    "(extra fingers:1.3), (missing fingers:1.3), (too many fingers:1.3), (fused fingers:1.3), "
+    "(mutated hands:1.2), (malformed hands:1.2), wrong number of fingers, "
+    "(bad eyes:1.4), (asymmetric eyes:1.3), (uneven eyes:1.3), cross-eyed, "
+    "(dead eyes:1.3), (empty eyes:1.2), (glowing eyes:1.2), (misaligned pupils:1.3), "
+    "(wonky eyes:1.2), (different sized eyes:1.2), "
+    "clean shaven, dark hair, black hair, brown hair, young man, teenager, "
+    "source_cartoon, source_anime, source_furry, "
+    "(anime:1.4), (cartoon:1.4), (3d render:1.3), (illustration:1.3), "
+    "painting, drawing, digital art, CGI, "
+    "text, watermark, username, censored, monochrome, "
+    "extra limbs, missing limbs, extra arms, extra legs, "
+    "overexposed, underexposed, plastic skin, airbrushed"
+)
 
 MULTI_CHAR_NEGATIVE = (
     "merged bodies, fused bodies, conjoined, conjoined twins, "
