@@ -342,8 +342,8 @@ def _generate(params):
         generator = _torch.Generator("cuda").manual_seed(seed)
 
         log.info(
-            "[gen #%d] %dx%d, %d steps, cfg=%.1f, seed=%d, style=%s -- %s",
-            gen_id, width, height, steps, cfg, seed, style, prompt[:100],
+            "[gen #%d] %dx%d, %d steps, cfg=%.1f, seed=%d -- %s",
+            gen_id, width, height, steps, cfg, seed, prompt[:100],
         )
 
         t0 = time.time()
