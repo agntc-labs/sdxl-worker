@@ -147,18 +147,18 @@ PONY_QUALITY_PREFIX = (
 )
 
 # CRITICAL: CLIP hard limit = 75 tokens. Tags beyond 75 are INVISIBLE.
-# Anti-style tags FIRST (most important for realism), then anatomy, then cosmetic.
-# Trimmed to ~65 words so per-agent additions (~10 words) still fit within 75 tokens.
+# 66 CLIP tokens — verified with CLIPTokenizer. Leaves ~5 tokens for per-agent negative.
+# Score penalties REMOVED (redundant — positive has score_9 + score_8_up pulling quality up).
+# Emphasis weights REMOVED (saves ~10 tokens vs weighted versions).
+# Anti-style FIRST (most important), then cosmetic, then anatomy, then artifacts.
 DEFAULT_NEGATIVE = (
-    "score_1, score_2, score_3, score_4, score_5, score_6, "
     "source_cartoon, source_anime, source_furry, "
-    "(anime:1.4), (cartoon:1.4), (3d render:1.3), (illustration:1.3), "
+    "anime, cartoon, 3d render, illustration, "
     "painting, drawing, digital art, CGI, "
-    "(tan lines:1.5), (bikini lines:1.5), "
-    "(bad anatomy:1.3), (bad hands:1.3), (deformed:1.2), ugly, blurry, "
-    "(bad eyes:1.4), (extra fingers:1.3), (fused fingers:1.3), "
-    "text, watermark, monochrome, "
-    "extra limbs, missing limbs, plastic skin, airbrushed"
+    "tan lines, bikini lines, "
+    "bad anatomy, bad hands, deformed, ugly, blurry, "
+    "bad eyes, extra fingers, fused fingers, "
+    "text, watermark, plastic skin"
 )
 
 MULTI_CHAR_NEGATIVE = (
