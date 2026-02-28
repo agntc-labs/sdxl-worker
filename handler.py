@@ -380,7 +380,6 @@ def _generate(params):
         "width": width,
         "height": height,
         "seed": seed,
-        "style": style,
         "gen_time": round(t_gen, 1),
         "freeu": True,
     }
