@@ -15,7 +15,6 @@ Input schema (matches tools.py call signature):
       # -- generate params --
       "prompt": str,
       "negative": str | null,
-      "style": str (default "realistic"),  # realistic|anime|cartoon|oil_painting|watercolor|comic
       "steps": int (default 35),
       "cfg": float (default 6.0),
       "width": int (default 832),
