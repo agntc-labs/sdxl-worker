@@ -4,7 +4,6 @@ Replicates the local sdxl_server.py pipeline (MPS) for cloud A100/A40 GPUs:
   - CyberRealistic Pony v8 SDXL + 5 LoRAs + FreeU
   - Clip skip 2, EulerAncestral scheduler, fp16-fix VAE
   - BREAK keyword support for character separation
-  - Dynamic style presets (realistic, anime, cartoon, oil_painting, watercolor, comic)
   - ADetailer face fix (YOLO detect -> img2img crop -> Poisson blend)
   - Returns base64-encoded PNG image
 
