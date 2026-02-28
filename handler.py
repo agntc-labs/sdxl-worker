@@ -308,15 +308,14 @@ def _generate(params):
     cfg = params.get("cfg", 6.0)
     seed = params.get("seed")
     negative = params.get("negative")
-    style = params.get("style", "realistic")
 
     if not prompt:
         return {"error": "Empty prompt"}
 
-    # ── Style preset lookup ──────────────────────────────────────────
-    preset = STYLE_PRESETS.get(style, STYLE_PRESETS["realistic"])
-    full_prompt = preset["quality_prefix"] + prompt
-    neg = preset["negative"] + (", " + negative if negative else "")
+    # Build full prompt — quality prefix prepended
+    full_prompt = PONY_QUALITY_PREFIX + prompt
+    # Append custom negative to default (don't replace — default has critical tags)
+    neg = DEFAULT_NEGATIVE + (", " + negative if negative else "")
 
     # ── Token count + hard trim to 75 tokens (CLIP limit) ──────────
     try:
