@@ -151,7 +151,6 @@ STYLE_PRESETS = {
             "score_1, score_2, score_3, score_4, score_5, score_6, "
             "source_cartoon, source_anime, source_furry, "
             "anime, cartoon, 3d render, illustration, painting, drawing, "
-            "tan lines, bikini lines, "
             "bad anatomy, bad hands, extra fingers, bad eyes, asymmetric eyes, "
             "extra limbs, missing limbs, deformed, ugly, blurry, "
             "text, watermark, monochrome, censored, "
