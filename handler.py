@@ -149,12 +149,8 @@ STYLE_PRESETS = {
         "quality_prefix": "score_9, score_8_up, source_pony, photorealistic, ",
         "negative": (
             "score_1, score_2, score_3, score_4, score_5, score_6, "
-            "source_cartoon, source_anime, source_furry, "
-            "anime, cartoon, 3d render, illustration, painting, drawing, "
-            "bad anatomy, bad hands, extra fingers, bad eyes, asymmetric eyes, "
-            "extra limbs, missing limbs, deformed, ugly, blurry, "
-            "text, watermark, monochrome, censored, "
-            "overexposed, underexposed, plastic skin"
+            "source_cartoon, source_anime, "
+            "bad anatomy, extra fingers, deformed, ugly, blurry"
         ),
     },
     "anime": {
