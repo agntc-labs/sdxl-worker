@@ -50,14 +50,15 @@ CLIP_TOKEN_LIMIT = 75
 # Quality prefix — 17 CLIP tokens verified.
 PONY_QUALITY_PREFIX = "score_9, score_8_up, source_pony, photorealistic, "
 
-# 48 CLIP tokens — verified. Anti-style first, then cosmetic, then anatomy.
+# ~53 CLIP tokens. Anti-style first, then objects, then cosmetic, then anatomy.
 DEFAULT_NEGATIVE = (
     "source_cartoon, source_anime, source_furry, "
     "anime, cartoon, 3d render, illustration, "
     "painting, drawing, digital art, CGI, "
+    "phone, smartphone, holding phone, "
     "tan lines, bikini lines, "
     "bad anatomy, bad hands, deformed, ugly, blurry, "
-    "bad eyes, extra fingers, fused fingers, "
+    "extra fingers, fused fingers, "
     "text, watermark, plastic skin"
 )
 
